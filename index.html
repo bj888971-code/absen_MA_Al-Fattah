@@ -962,16 +962,47 @@
       await loadFromServer();
     };
 
-    // Samakan format data guru dari Sheet (NIP bisa terbaca sebagai angka) agar login tidak gagal
+    // Samakan format data guru dari Sheet agar login tidak gagal:
+    // - nama kolom (header) dibaca tanpa peduli huruf besar/kecil, spasi, atau tanda baca
+    // - angka (NIP / password numerik) diubah ke teks penuh tanpa notasi ilmiah
+    // - spasi tak terlihat, tanda petik awal (') dan karakter tersembunyi dibersihkan
+    function cleanCell(v) {
+      if (v == null) return '';
+      if (typeof v === 'number') {
+        return v.toLocaleString('fullwide', { useGrouping: false, maximumFractionDigits: 20 });
+      }
+      return String(v)
+        .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, ' ')
+        .trim()
+        .replace(/^'+/, '')
+        .trim();
+    }
+    function pickField(obj, aliases) {
+      const keys = Object.keys(obj || {});
+      for (const alias of aliases) {
+        const k = keys.find(key => String(key).toLowerCase().replace(/[^a-z0-9]/g, '') === alias);
+        if (k !== undefined) {
+          const val = cleanCell(obj[k]);
+          if (val !== '') return val;
+        }
+      }
+      return '';
+    }
     function normalizeGuru() {
       dataGuru = (dataGuru || []).map(g => {
-        const nip = String(g.nip == null ? '' : g.nip).trim();
         return Object.assign({}, g, {
-          nip,
-          username: String(g.username == null ? '' : g.username).trim(),
-          password: String(g.password == null ? '' : g.password).trim()
+          nip: pickField(g, ['nip', 'nipkode', 'nipkodeguru', 'kodeguru', 'kode', 'nik']),
+          username: pickField(g, ['username', 'user', 'userid', 'namapengguna', 'namauser', 'login']),
+          password: pickField(g, ['password', 'pass', 'pwd', 'katasandi', 'sandi', 'pin'])
         });
       });
+    }
+    // NIP 18 digit yang tersimpan sebagai angka di Sheet kehilangan presisi (hanya ~15 digit akurat)
+    function samaNip(a, b) {
+      a = String(a || ''); b = String(b || '');
+      if (a === b) return true;
+      if (/^\d{16,}$/.test(a) && /^\d{16,}$/.test(b)) return a.slice(0, 15) === b.slice(0, 15);
+      return false;
     }
     function populateLoginGuruDropdown() { normalizeGuru(); }
 
@@ -1009,17 +1040,24 @@
         }
       } else {
         normalizeGuru();
-        const userInput = document.getElementById('loginGuruUsername').value.trim().toLowerCase();
+        const userInput = cleanCell(document.getElementById('loginGuruUsername').value).toLowerCase();
         const guruObj = dataGuru.find(g => {
           const uname = (g.username || g.nip).toLowerCase();
-          return uname === userInput || g.nip.toLowerCase() === userInput;
+          return uname === userInput || g.nip.toLowerCase() === userInput || samaNip(g.nip, userInput);
         });
-        const passBenar = guruObj ? (guruObj.password || guruObj.nip) : null;
-        if (guruObj && passwordInput === passBenar) {
-          currentUser = { role: 'guru', name: guruObj.nama, nip: guruObj.nip };
-          startAppSession();
+        if (!guruObj) {
+          console.warn('Login guru: username tidak ditemukan. Data guru termuat:', dataGuru.length);
+          showToast(dataGuru.length ? 'Username guru tidak ditemukan di data Spreadsheet.' : 'Data guru belum termuat dari Spreadsheet. Muat ulang halaman.', false);
         } else {
-          showToast('Username atau password guru salah.', false);
+          const passBenar = guruObj.password || guruObj.nip;
+          const passInput = cleanCell(document.getElementById('loginPassword').value);
+          const cocok = passInput === passBenar || (!guruObj.password && samaNip(guruObj.nip, passInput));
+          if (cocok) {
+            currentUser = { role: 'guru', name: guruObj.nama, nip: guruObj.nip };
+            startAppSession();
+          } else {
+            showToast('Password guru salah.', false);
+          }
         }
       }
     }
@@ -2082,10 +2120,9 @@
           
           let count = 0;
           rows.forEach(r => {
-            const nipRaw = r["NIP / Kode"] || r["NIP / Kode Guru"] || r["NIP"] || '';
-            const nip = String(nipRaw).trim();
-            const username = String(r["Username"] || '').trim();
-            const password = String(r["Password"] || '').trim();
+            const nip = pickField(r, ['nip', 'nipkode', 'nipkodeguru', 'kodeguru', 'kode']);
+            const username = pickField(r, ['username', 'user', 'userid', 'namapengguna']);
+            const password = pickField(r, ['password', 'pass', 'katasandi', 'sandi', 'pin']);
             const nama = r["Nama Guru & Gelar"] || r["Nama"] || '';
             const mapel = r["Mata Pelajaran"] || '-';
             const kelas = r["Kelas Pengampu"] || 'X IPA 1';
