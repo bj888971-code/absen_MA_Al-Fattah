@@ -53,10 +53,8 @@
         </div>
 
         <div id="groupGuruSelect" class="hidden">
-          <label class="block font-medium text-slate-200 mb-1.5">Pilih Akun Guru (NIP)</label>
-          <select id="loginGuruNip" class="w-full bg-slate-800/80 border border-slate-700 rounded-xl p-3 text-white outline-none focus:ring-2 focus:ring-blue-500">
-            <!-- Populated dynamically -->
-          </select>
+          <label class="block font-medium text-slate-200 mb-1.5">Username Guru</label>
+          <input type="text" id="loginGuruUsername" autocomplete="username" class="w-full bg-slate-800/80 border border-slate-700 rounded-xl p-3 text-white outline-none focus:ring-2 focus:ring-blue-500" placeholder="Username atau NIP">
         </div>
 
         <div id="groupUsername" class="">
@@ -718,6 +716,7 @@
                 <tr>
                   <th class="p-3">No</th>
                   <th class="p-3">NIP / Kode</th>
+                  <th class="p-3">Username</th>
                   <th class="p-3">Nama Guru & Gelar</th>
                   <th class="p-3">Mata Pelajaran Diampu</th>
                   <th class="p-3">Kelas Pengampu</th>
@@ -854,8 +853,18 @@
       <form id="formGuru" onsubmit="simpanGuru(event)" class="p-6 space-y-4 text-xs">
         <input type="hidden" id="guruId">
         <div>
-          <label class="block font-medium text-slate-700 mb-1">NIP / Kode Guru (Password Login)</label>
+          <label class="block font-medium text-slate-700 mb-1">NIP / Kode Guru</label>
           <input type="text" id="guruNip" required class="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 outline-none focus:ring-2 focus:ring-teal-500" placeholder="Contoh: 19820312...">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-medium text-slate-700 mb-1">Username Login</label>
+            <input type="text" id="guruUsername" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 outline-none focus:ring-2 focus:ring-teal-500" placeholder="Kosong = pakai NIP">
+          </div>
+          <div>
+            <label class="block font-medium text-slate-700 mb-1">Password Login</label>
+            <input type="text" id="guruPassword" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 outline-none focus:ring-2 focus:ring-teal-500" placeholder="Kosong = pakai NIP">
+          </div>
         </div>
         <div>
           <label class="block font-medium text-slate-700 mb-1">Nama Lengkap & Gelar</label>
@@ -953,13 +962,18 @@
       await loadFromServer();
     };
 
-    function populateLoginGuruDropdown() {
-      const select = document.getElementById('loginGuruNip');
-      select.innerHTML = '';
-      dataGuru.forEach(g => {
-        select.innerHTML += `<option value="${g.nip}">${g.nama} (NIP: ${g.nip})</option>`;
+    // Samakan format data guru dari Sheet (NIP bisa terbaca sebagai angka) agar login tidak gagal
+    function normalizeGuru() {
+      dataGuru = (dataGuru || []).map(g => {
+        const nip = String(g.nip == null ? '' : g.nip).trim();
+        return Object.assign({}, g, {
+          nip,
+          username: String(g.username == null ? '' : g.username).trim(),
+          password: String(g.password == null ? '' : g.password).trim()
+        });
       });
     }
+    function populateLoginGuruDropdown() { normalizeGuru(); }
 
     function onLoginRoleChange() {
       const role = document.getElementById('loginRole').value;
@@ -971,8 +985,8 @@
       if (role === 'guru') {
         groupGuru.classList.remove('hidden');
         groupUsername.classList.add('hidden');
-        labelPwd.innerText = 'Password (Sesuai NIP Guru Diatas)';
-        hint.innerHTML = 'Password guru adalah <span class="text-teal-400 font-bold">NIP Guru</span> yang dipilih di atas.';
+        labelPwd.innerText = 'Password Guru';
+        hint.innerHTML = 'Gunakan username & password dari menu Data Guru. Jika kosong, keduanya <span class="text-teal-400 font-bold">NIP Guru</span>.';
       } else {
         groupGuru.classList.add('hidden');
         groupUsername.classList.remove('hidden');
@@ -994,13 +1008,18 @@
           showToast('Password Admin salah! Coba admin123', false);
         }
       } else {
-        const selectedNip = document.getElementById('loginGuruNip').value;
-        const guruObj = dataGuru.find(g => g.nip === selectedNip);
-        if (guruObj && passwordInput === guruObj.nip) {
+        normalizeGuru();
+        const userInput = document.getElementById('loginGuruUsername').value.trim().toLowerCase();
+        const guruObj = dataGuru.find(g => {
+          const uname = (g.username || g.nip).toLowerCase();
+          return uname === userInput || g.nip.toLowerCase() === userInput;
+        });
+        const passBenar = guruObj ? (guruObj.password || guruObj.nip) : null;
+        if (guruObj && passwordInput === passBenar) {
           currentUser = { role: 'guru', name: guruObj.nama, nip: guruObj.nip };
           startAppSession();
         } else {
-          showToast('Password salah! Password guru sesuai dengan data NIP guru.', false);
+          showToast('Username atau password guru salah.', false);
         }
       }
     }
@@ -1494,7 +1513,7 @@
 
       dataGuru.forEach((guru, index) => {
         let actionColumn = '';
-        if (currentUser.role === 'admin') {
+        if (currentUser && currentUser.role === 'admin') {
           actionColumn = `
             <td class="p-3 text-center space-x-3">
               <button onclick="editGuru('${guru.id}')" class="text-teal-600 hover:text-teal-800"><i class="fa-solid fa-pen-to-square"></i></button>
@@ -1509,6 +1528,7 @@
           <tr class="hover:bg-slate-50 transition">
             <td class="p-3 font-medium text-slate-500">${index + 1}</td>
             <td class="p-3 font-semibold text-teal-700">${guru.nip}</td>
+            <td class="p-3 text-slate-600">${guru.username || guru.nip}</td>
             <td class="p-3 font-semibold text-slate-800">${guru.nama}</td>
             <td class="p-3 text-slate-600">${guru.mapel}</td>
             <td class="p-3 text-slate-600">${guru.kelas}</td>
@@ -1933,6 +1953,8 @@
       document.getElementById('modalGuruTitle').innerText = 'Edit Data Guru';
       document.getElementById('guruId').value = g.id;
       document.getElementById('guruNip').value = g.nip;
+      document.getElementById('guruUsername').value = g.username || '';
+      document.getElementById('guruPassword').value = g.password || '';
       document.getElementById('guruNama').value = g.nama;
       document.getElementById('guruMapel').value = g.mapel;
       document.getElementById('guruKelas').value = g.kelas;
@@ -1942,7 +1964,9 @@
     function simpanGuru(e) {
       e.preventDefault();
       const id = document.getElementById('guruId').value;
-      const nip = document.getElementById('guruNip').value;
+      const nip = document.getElementById('guruNip').value.trim();
+      const username = document.getElementById('guruUsername').value.trim();
+      const password = document.getElementById('guruPassword').value.trim();
       const nama = document.getElementById('guruNama').value;
       const mapel = document.getElementById('guruMapel').value;
       const kelas = document.getElementById('guruKelas').value;
@@ -1951,6 +1975,8 @@
         const g = dataGuru.find(item => item.id === id);
         if (g) {
           g.nip = nip;
+          g.username = username;
+          g.password = password;
           g.nama = nama;
           g.mapel = mapel;
           g.kelas = kelas;
@@ -1960,6 +1986,8 @@
         const newG = {
           id: 'g_' + Date.now(),
           nip,
+          username,
+          password,
           nama,
           mapel,
           kelas
@@ -1992,7 +2020,7 @@
 
     function downloadTemplateGuruExcel() {
       const template = [
-        { "NIP / Kode": "198501012010011005", "Nama Guru & Gelar": "H. Abdullah, M.Pd.I.", "Mata Pelajaran": "Fikih", "Kelas Pengampu": "X IPA 1, XI IPS 2" }
+        { "NIP / Kode": "198501012010011005", "Username": "abdullah", "Password": "rahasia123", "Nama Guru & Gelar": "H. Abdullah, M.Pd.I.", "Mata Pelajaran": "Fikih", "Kelas Pengampu": "X IPA 1, XI IPS 2" }
       ];
       const ws = XLSX.utils.json_to_sheet(template);
       const wb = XLSX.utils.book_new();
@@ -2054,7 +2082,10 @@
           
           let count = 0;
           rows.forEach(r => {
-            const nip = r["NIP / Kode"] ? String(r["NIP / Kode"]) : '';
+            const nipRaw = r["NIP / Kode"] || r["NIP / Kode Guru"] || r["NIP"] || '';
+            const nip = String(nipRaw).trim();
+            const username = String(r["Username"] || '').trim();
+            const password = String(r["Password"] || '').trim();
             const nama = r["Nama Guru & Gelar"] || r["Nama"] || '';
             const mapel = r["Mata Pelajaran"] || '-';
             const kelas = r["Kelas Pengampu"] || 'X IPA 1';
@@ -2062,6 +2093,8 @@
               dataGuru.push({
                 id: 'g_imp_' + Date.now() + '_' + Math.random(),
                 nip,
+                username,
+                password,
                 nama,
                 mapel,
                 kelas
@@ -2119,6 +2152,7 @@
         identitasSekolah = Object.assign(identitasSekolah, d.identitas || {});
         dataSiswa = d.siswa;
         dataGuru = d.guru;
+        normalizeGuru();
         dataPelanggaran = d.pelanggaran;
         dataAgenda = d.agenda;
         dataAbsensi = {};
